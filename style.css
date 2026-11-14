@@ -1,0 +1,136 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body {
+  background: #171a26; color: #fff;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  user-select: none; -webkit-user-select: none; touch-action: manipulation;
+}
+button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+[hidden] { display: none !important; }
+
+#app { height: 100vh; display: grid; grid-template-rows: auto 1fr auto auto; gap: 8px; padding: 8px; }
+#app.rec { box-shadow: inset 0 0 0 6px #ff3b3b; }
+
+/* ---------- Barra de arriba ---------- */
+#top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.big { width: 84px; height: 84px; border-radius: 50%; font-size: 40px; line-height: 1; box-shadow: 0 5px 0 #0007; }
+.big:active { transform: translateY(3px); box-shadow: 0 2px 0 #0007; }
+.green { background: #2ecc71; }
+.red { background: #e53935; }
+#app.rec #bRec { animation: pulse 0.8s infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 14px #ff3b3b55; } }
+.btn {
+  min-width: 70px; height: 70px; border-radius: 16px; background: #2a3045; padding: 4px 8px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 4px 0 #0006;
+}
+.btn b { font-size: 30px; line-height: 1.1; font-weight: 700; }
+.btn small { font-size: 12px; opacity: .8; }
+.btn:active { transform: translateY(2px); }
+.btn.toggle { opacity: .45; }
+.btn.toggle.on { opacity: 1; background: #3b4a7a; }
+.group { display: flex; align-items: center; gap: 6px; background: #1f2435; padding: 5px; border-radius: 20px; }
+#tempo { font-size: 34px; font-weight: 800; width: 76px; text-align: center; }
+#bars .btn { min-width: 54px; }
+#bars .btn.on { background: #f4b942; color: #222; }
+.spacer { flex: 1; }
+#midiStatus { font-size: 20px; background: #1f2435; padding: 10px 14px; border-radius: 16px; white-space: nowrap; }
+#midiStatus.ok { background: #1e5b3a; }
+
+/* ---------- Pistas ---------- */
+#tracks { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; min-height: 0; --ph: 0; }
+.track {
+  display: grid; grid-template-columns: 150px 1fr 64px 64px; gap: 6px; align-items: stretch;
+  min-height: 62px; flex: 1 1 62px; max-height: 110px;
+  background: #1f2435; border-radius: 16px; padding: 5px; border: 4px solid transparent; cursor: pointer;
+}
+.track.sel { border-color: var(--c); background: #283050; }
+.t-inst {
+  background: var(--c); color: #111; border-radius: 12px; display: flex; align-items: center; gap: 6px;
+  padding: 0 8px; font-weight: 800; font-size: 15px; overflow: hidden; text-align: left;
+}
+.t-inst i { font-style: normal; font-size: 34px; }
+.t-lane { position: relative; border-radius: 10px; overflow: hidden; background: #12141d; }
+.t-lane canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.t-lane .ph { position: absolute; top: 0; bottom: 0; width: 4px; margin-left: -2px; background: #fff; left: calc(var(--ph) * 100%); border-radius: 2px; opacity: .9; }
+.t-btn { background: #2a3045; border-radius: 12px; font-size: 28px; }
+.t-btn.off { background: #7a2a2a; }
+#bAdd { flex: 0 0 auto; align-self: flex-start; background: #2a3045; border-radius: 14px; font-size: 24px; padding: 6px 22px; }
+
+/* ---------- Panel: instrumento, pads, roscas ---------- */
+#panel { display: grid; grid-template-columns: 170px 1fr 1fr; gap: 10px; --c: #888; }
+#instCard {
+  background: var(--c); color: #111; border-radius: 20px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2px; font-weight: 800; font-size: 18px; box-shadow: 0 5px 0 #0007; padding: 6px;
+}
+#instCard i { font-style: normal; font-size: 64px; line-height: 1.1; }
+#instCard small { font-size: 12px; font-weight: 600; opacity: .75; }
+#pads { display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: 1fr 1fr; gap: 8px; }
+.pad {
+  background: var(--pc); border-radius: 16px; min-height: 76px; font-size: 13px; font-weight: 800; color: #111;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 5px 0 #0007;
+}
+.pad i { font-style: normal; font-size: 34px; line-height: 1.1; }
+.pad.hit { filter: brightness(1.7); transform: scale(.94); }
+#knobs { display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: 1fr 1fr; gap: 8px; background: #1f2435; border-radius: 20px; padding: 8px; }
+.knob { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: ns-resize; touch-action: none; border-radius: 12px; }
+.knob .dial {
+  width: 62px; height: 62px; border-radius: 50%; position: relative;
+  background: conic-gradient(from 225deg, var(--c) calc(var(--v) * 270deg), #3a4160 0 270deg, transparent 0);
+}
+.knob .dial::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: #12141d; }
+.knob .dial span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 26px; }
+.knob .dial u { position: absolute; inset: 0; transform: rotate(calc(-135deg + var(--v) * 270deg)); }
+.knob .dial u::after { content: ""; position: absolute; left: 50%; top: 1px; width: 5px; height: 12px; margin-left: -2.5px; background: #fff; border-radius: 3px; }
+.knob label { font-size: 13px; font-weight: 700; pointer-events: none; }
+.learnTarget { outline: 5px solid #fff; outline-offset: 2px; animation: blink .6s infinite; }
+@keyframes blink { 50% { outline-color: transparent; } }
+
+/* ---------- Piano ---------- */
+#piano { position: relative; height: 96px; display: flex; gap: 3px; }
+.wk { flex: 1; background: #f4f4f4; border-radius: 0 0 10px 10px; box-shadow: inset 0 -6px 0 #bbb; }
+.bk { position: absolute; top: 0; height: 58%; background: #15151c; border-radius: 0 0 7px 7px; z-index: 2; }
+.wk.on, .bk.on { background: var(--c, #f4b942); box-shadow: none; }
+
+/* ---------- Capas ---------- */
+#start { position: fixed; inset: 0; background: #171a26; display: grid; place-items: center; z-index: 50; }
+#bStart { font-size: 120px; background: #2ecc71; border-radius: 50px; padding: 30px 70px; display: flex; flex-direction: column; align-items: center; box-shadow: 0 10px 0 #0007; }
+#bStart span { font-size: 44px; font-weight: 800; color: #111; }
+#countIn { position: fixed; inset: 0; display: grid; place-items: center; font-size: 40vh; font-weight: 900; color: #ffffffcc; pointer-events: none; z-index: 20; text-shadow: 0 0 40px #000; }
+#toast, #learnBar {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 40; background: #f4b942; color: #111;
+  font-size: 24px; font-weight: 800; padding: 14px 26px; border-radius: 20px; box-shadow: 0 6px 20px #000a;
+}
+#toast { bottom: 130px; }
+#learnBar { top: 100px; display: flex; gap: 16px; align-items: center; }
+#learnBar button { background: #111; color: #fff; border-radius: 12px; padding: 6px 14px; font-size: 18px; }
+#modal { position: fixed; inset: 0; background: #000b; display: grid; place-items: center; z-index: 30; }
+#modalBox { background: #232842; border-radius: 28px; padding: 22px; max-width: 94vw; max-height: 92vh; overflow: auto; }
+#modalBox h2 { margin: 0 0 14px; font-size: 28px; }
+.tiles { display: grid; grid-template-columns: repeat(6, 124px); gap: 10px; }
+.tile { height: 112px; border-radius: 18px; background: #323a5e; font-weight: 800; font-size: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
+.tile i { font-style: normal; font-size: 46px; line-height: 1.15; }
+.tile em { position: absolute; top: 4px; right: 8px; font-style: normal; font-size: 14px; opacity: .7; }
+.tile.cur { background: var(--c); color: #111; }
+.tile:hover { filter: brightness(1.2); }
+.row { display: flex; gap: 12px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+.pill { background: #323a5e; border-radius: 14px; padding: 12px 18px; font-size: 18px; font-weight: 700; }
+.pill.go { background: #2ecc71; color: #111; }
+.pill.danger { background: #b23333; }
+select { font: inherit; font-size: 16px; padding: 6px; border-radius: 8px; }
+.hint { opacity: .75; font-size: 14px; max-width: 620px; line-height: 1.4; }
+.micBig { width: 170px; height: 170px; border-radius: 50%; font-size: 84px; background: #e53935; box-shadow: 0 8px 0 #0007; }
+.micBig.recording { animation: pulse .6s infinite; background: #ff7043; }
+#micLevel { width: 320px; height: 18px; background: #12141d; border-radius: 9px; overflow: hidden; }
+#micLevel i { display: block; height: 100%; width: 0; background: #2ecc71; }
+#micWave { width: 420px; height: 90px; background: #12141d; border-radius: 12px; }
+.center { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+
+@media (max-height: 760px) {
+  .big { width: 66px; height: 66px; font-size: 32px; }
+  .btn { height: 58px; min-width: 60px; }
+  .pad { min-height: 58px; } .pad i { font-size: 26px; }
+  .knob .dial { width: 50px; height: 50px; } .knob .dial span { font-size: 20px; }
+  #instCard i { font-size: 46px; }
+  #piano { height: 74px; }
+}
+@media (max-width: 1000px) { .tiles { grid-template-columns: repeat(4, 110px); } .track { grid-template-columns: 110px 1fr 54px 54px; } }
