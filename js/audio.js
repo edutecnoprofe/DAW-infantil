@@ -11,7 +11,7 @@ const Engine = (() => {
     ctx = new AC({ latencyHint: 'interactive' });
 
     const limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -10; limiter.knee.value = 6; limiter.ratio.value = 12;
+    limiter.threshold.value = -6; limiter.knee.value = 6; limiter.ratio.value = 8;
     limiter.attack.value = 0.003; limiter.release.value = 0.2;
     master = ctx.createGain(); master.gain.value = 0.8;
     master.connect(limiter); limiter.connect(ctx.destination);
@@ -82,8 +82,8 @@ const Engine = (() => {
   function setKnob(ch, i, v) {
     const x = v / 127, t = ctx.currentTime, s = 0.02;
     switch (i) {
-      case 0: ch.vol.gain.setTargetAtTime(x * x * 1.3, t, s); break;
-      case 1: ch.filter.frequency.setTargetAtTime(120 * Math.pow(150, x), t, s); break;
+      case 0: ch.vol.gain.setTargetAtTime(0.06 + x * x * 1.24, t, s); break;
+      case 1: ch.filter.frequency.setTargetAtTime(260 * Math.pow(70, x), t, s); break;
       case 2: ch.echoSend.gain.setTargetAtTime(x * 0.8, t, s); break;
       case 3: ch.revSend.gain.setTargetAtTime(x * 0.9, t, s); break;
       case 4: ch.shaper.curve = distCurve(x); break;
@@ -176,7 +176,7 @@ const Engine = (() => {
   /* ---------- Batería sintetizada (8 pads) ---------- */
   function drum(ch, i, time, vel) {
     const t = Math.max(time || 0, ctx.currentTime);
-    const out = ctx.createGain(); out.gain.value = 0.3 + 0.7 * (vel / 127);
+    const out = ctx.createGain(); out.gain.value = (0.3 + 0.7 * (vel / 127)) * 0.55;
     out.connect(ch.input);
     let pending = 0;
     const track = (src, end) => {

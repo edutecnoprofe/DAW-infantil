@@ -19,10 +19,10 @@ const INSTRUMENTS = [
   { id: 'drums', name: 'Batería', icon: '🥁', type: 'drums' },
   { id: 'mic', name: 'Mi voz', icon: '🎤', type: 'mic' },
   { id: 'sinte', name: 'Sinte', icon: '🚀', type: 'synth', preset: { oscs: [{ type: 'sawtooth', det: -8 }, { type: 'sawtooth', det: 8 }], gain: 0.16, attack: 0.01 } },
-  { id: 'robot', name: 'Robot', icon: '🤖', type: 'synth', preset: { oscs: [{ type: 'square' }], gain: 0.14, attack: 0.005 } },
+  { id: 'robot', name: 'Robot', icon: '🤖', type: 'synth', preset: { oscs: [{ type: 'square' }], gain: 0.26, attack: 0.005 } },
   { id: 'alien', name: 'Marciano', icon: '👽', type: 'synth', preset: { oscs: [{ type: 'sine' }, { type: 'sine', ratio: 2, gain: 0.25 }], gain: 0.4, attack: 0.03, glide: 2 } },
   { id: 'bass', name: 'Bajo gordo', icon: '🐘', type: 'synth', preset: { oscs: [{ type: 'triangle' }, { type: 'square', gain: 0.3 }], gain: 0.42, attack: 0.008, oct: -1 } },
-  { id: 'game', name: 'Consola', icon: '👾', type: 'synth', preset: { oscs: [{ type: 'square' }, { type: 'square', ratio: 2, gain: 0.4, det: 6 }], gain: 0.1, attack: 0.002 } },
+  { id: 'game', name: 'Consola', icon: '👾', type: 'synth', preset: { oscs: [{ type: 'square' }, { type: 'square', ratio: 2, gain: 0.4, det: 6 }], gain: 0.2, attack: 0.002 } },
   { id: 'piano', name: 'Piano', icon: '🎹', type: 'sf', sf: 'acoustic_grand_piano' },
   { id: 'guitar', name: 'Guitarra', icon: '🎸', type: 'sf', sf: 'acoustic_guitar_nylon' },
   { id: 'eguitar', name: 'Guitarra rock', icon: '⚡', type: 'sf', sf: 'overdriven_guitar', gain: 0.7 },
@@ -98,7 +98,7 @@ async function setInstrument(tr, id) {
     try {
       const samples = await Engine.loadSoundfont(def.sf);
       if (tr.tok !== tok) return;
-      tr.rt = { type: 'sample', samples, gain: (def.gain || 1) * 2.2 };
+      tr.rt = { type: 'sample', samples, gain: (def.gain || 1) * 6.5 };
     } catch (e) {
       if (tr.tok !== tok) return;
       toast('😢 Sin internet no puedo bajar ' + def.name);
@@ -201,7 +201,8 @@ function recordEvent(ev) {
 /* ---------- Tocar en directo ---------- */
 const held = new Map();
 function noteOn(midi, vel) {
-  if (!Engine.ctx || held.has(midi)) return;
+  if (!Engine.ctx) return;
+  if (held.has(midi)) noteOff(midi); // nota atascada: se vuelve a tocar
   const tr = cur();
   if (tr.rt && tr.rt.type === 'drums') { padOn(mod(midi - 36, 8), vel); return; }
   if (tr.inst === 'mic' && !tr.mic) { openMic(tr); return; }
@@ -230,8 +231,26 @@ function padOn(i, vel) {
 }
 function allOff() { for (const m of [...held.keys()]) noteOff(m); }
 
-function setKnob(tr, i, v) {
+// Roscas físicas: no mandan hasta pasar por el valor de la pantalla (evita saltos al cambiar de pista)
+const hw = { last: Array(8).fill(null), on: Array(8).fill(false) };
+function hwKnob(i, v) {
+  const tr = cur(), c = tr.knobs[i], prev = hw.last[i];
+  hw.last[i] = v;
+  if (!hw.on[i] && (Math.abs(v - c) <= 8 || (prev != null && (prev - c) * (v - c) <= 0))) hw.on[i] = true;
+  if (hw.on[i]) setKnob(tr, i, v, true);
+  ghost(i, hw.on[i] ? null : v);
+}
+function ghost(i, v) {
+  knobEls[i].classList.toggle('ghost', v != null);
+  if (v != null) knobEls[i].style.setProperty('--g', v / 127);
+}
+function resetKnobs() {
+  KNOBS.forEach((k, i) => setKnob(cur(), i, k.def));
+  toast('🧽 Efectos quitados');
+}
+function setKnob(tr, i, v, fromHw) {
   v = clamp(Math.round(v), 0, 127);
+  if (!fromHw && tr === cur()) { hw.on[i] = false; ghost(i, null); }
   tr.knobs[i] = v; Engine.setKnob(tr.chain, i, v);
   if (tr === cur()) knobEls[i].style.setProperty('--v', v / 127);
   saveSoon();
@@ -239,6 +258,7 @@ function setKnob(tr, i, v) {
 function selectTrack(i) {
   if (i === state.sel) return;
   allOff(); state.sel = i;
+  hw.on.fill(false); knobEls.forEach((el, k) => ghost(k, null));
   if (T.rec) newTake();
   renderTracks(); renderPanel(); saveSoon();
 }
@@ -343,7 +363,7 @@ function buildStatic() {
   KNOBS.forEach((k, i) => {
     const el = document.createElement('div');
     el.className = 'knob';
-    el.innerHTML = `<div class="dial"><u></u><span>${k.icon}</span></div><label>${k.name}</label>`;
+    el.innerHTML = `<div class="dial"><u></u><b></b><span>${k.icon}</span></div><label>${k.name}</label>`;
     let y0 = 0, v0 = 0, drag = false;
     el.onpointerdown = e => { drag = true; y0 = e.clientY; v0 = cur().knobs[i]; el.setPointerCapture(e.pointerId); };
     el.onpointermove = e => { if (drag) setKnob(cur(), i, v0 + (y0 - e.clientY) * 0.9); };
@@ -352,6 +372,9 @@ function buildStatic() {
     el.onwheel = e => { e.preventDefault(); setKnob(cur(), i, cur().knobs[i] - Math.sign(e.deltaY) * 4); };
     knobEls[i] = el; $('#knobs').appendChild(el);
   });
+  const fx = document.createElement('button');
+  fx.id = 'bFx'; fx.textContent = '🧽'; fx.title = 'Quitar efectos de esta pista'; fx.onclick = resetKnobs;
+  $('#knobs').appendChild(fx);
   // piano
   const piano = $('#piano'), blacks = [1, 3, 6, 8, 10], whites = [];
   for (let m = PIANO_LO; m <= PIANO_HI; m++) if (!blacks.includes(m % 12)) whites.push(m);
@@ -537,7 +560,7 @@ function onMidi(e) {
       if (d1 >= 70 && d1 <= 77) i = d1 - 70;
       else if (d1 >= 1 && d1 <= 8 && /LPD/i.test(name)) i = d1 - 1;
     }
-    if (i != null) setKnob(cur(), i, d2);
+    if (i != null) hwKnob(i, d2);
   }
 }
 
