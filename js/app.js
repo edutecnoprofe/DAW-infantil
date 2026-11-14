@@ -231,26 +231,23 @@ function padOn(i, vel) {
 }
 function allOff() { for (const m of [...held.keys()]) noteOff(m); }
 
-// Roscas físicas: no mandan hasta pasar por el valor de la pantalla (evita saltos al cambiar de pista)
-const hw = { last: Array(8).fill(null), on: Array(8).fill(false) };
+// Roscas físicas: mandan en cuanto se giran de verdad (3 pasos); el temblor suelto del potenciómetro se ignora
+const hw = { ref: Array(8).fill(null), on: Array(8).fill(false) };
 function hwKnob(i, v) {
-  const tr = cur(), c = tr.knobs[i], prev = hw.last[i];
-  hw.last[i] = v;
-  if (!hw.on[i] && (Math.abs(v - c) <= 8 || (prev != null && (prev - c) * (v - c) <= 0))) hw.on[i] = true;
-  if (hw.on[i]) setKnob(tr, i, v, true);
-  ghost(i, hw.on[i] ? null : v);
+  if (!hw.on[i]) {
+    if (hw.ref[i] == null) { hw.ref[i] = v; return; }
+    if (Math.abs(v - hw.ref[i]) < 3) return;
+    hw.on[i] = true;
+  }
+  setKnob(cur(), i, v, true);
 }
-function ghost(i, v) {
-  knobEls[i].classList.toggle('ghost', v != null);
-  if (v != null) knobEls[i].style.setProperty('--g', v / 127);
-}
+function hwRelease() { hw.on.fill(false); hw.ref.fill(null); }
 function resetKnobs() {
   KNOBS.forEach((k, i) => setKnob(cur(), i, k.def));
   toast('🧽 Efectos quitados');
 }
 function setKnob(tr, i, v, fromHw) {
   v = clamp(Math.round(v), 0, 127);
-  if (!fromHw && tr === cur()) { hw.on[i] = false; ghost(i, null); }
   tr.knobs[i] = v; Engine.setKnob(tr.chain, i, v);
   if (tr === cur()) knobEls[i].style.setProperty('--v', v / 127);
   saveSoon();
@@ -258,7 +255,7 @@ function setKnob(tr, i, v, fromHw) {
 function selectTrack(i) {
   if (i === state.sel) return;
   allOff(); state.sel = i;
-  hw.on.fill(false); knobEls.forEach((el, k) => ghost(k, null));
+  hwRelease();
   if (T.rec) newTake();
   renderTracks(); renderPanel(); saveSoon();
 }
@@ -535,6 +532,7 @@ function midiStatus() {
 function padIndexFor(name, ch, key, num) {
   const full = name + '|' + key;
   if (learn && learn.type === 'pad') { learnFeed(full); return -1; }
+  if (learn) return -1;
   if (full in M.padMap) return M.padMap[full];
   if (Object.keys(M.padMap).some(k => k.startsWith(name + '|'))) return null; // aparato ya enseñado: lo demás son teclas
   const role = M.roles[name] || 'auto';
@@ -542,8 +540,18 @@ function padIndexFor(name, ch, key, num) {
   return isPad ? mod(num - 36, 8) : null;
 }
 
+const MIDI_KIND = { 0x80: 'nota OFF', 0x90: 'nota', 0xA0: 'presión', 0xB0: 'rosca/CC', 0xC0: 'programa', 0xD0: 'presión', 0xE0: 'rueda' };
+let lastMidi = 'Todavía no ha llegado nada', actTimer = 0;
+function midiMonitor(name, cmd, ch, d1, d2) {
+  lastMidi = `${name} · ${MIDI_KIND[cmd] || cmd} ${d1}${d2 == null ? '' : ' = ' + d2} · canal ${ch + 1}`;
+  const m = $('#midiMon'); if (m) m.textContent = lastMidi;
+  const el = $('#midiStatus'); el.classList.add('act');
+  clearTimeout(actTimer); actTimer = setTimeout(() => el.classList.remove('act'), 120);
+}
 function onMidi(e) {
   const [st, d1, d2] = e.data, cmd = st & 0xf0, ch = st & 0x0f, name = e.target.name || '?';
+  if (st >= 0xf0) return; // reloj y mensajes de sistema
+  midiMonitor(name, cmd, ch, d1, d2);
   if (cmd === 0x90 && d2 > 0) {
     const p = padIndexFor(name, ch, d1, d1);
     if (p === null) noteOn(d1, d2);
@@ -566,15 +574,16 @@ function onMidi(e) {
 
 function startLearn(type) {
   closeModal();
-  learn = { type, idx: 0, seen: new Set() };
-  if (type === 'knob') M.ccMap = {}; else M.padMap = {};
+  learn = { type, idx: 0, map: {} };
   showLearn();
 }
 function learnFeed(key) {
-  if (learn.seen.has(key)) return;
-  learn.seen.add(key);
-  (learn.type === 'knob' ? M.ccMap : M.padMap)[key] = learn.idx++;
-  if (learn.idx >= 8) { learn = null; saveM(); toast('✅ ¡Aprendido!'); }
+  if (key in learn.map) return;
+  learn.map[key] = learn.idx++;
+  if (learn.idx >= 8) {
+    if (learn.type === 'knob') M.ccMap = learn.map; else M.padMap = learn.map;
+    learn = null; saveM(); toast('✅ ¡Aprendido!');
+  }
   showLearn();
 }
 function showLearn() {
@@ -585,7 +594,7 @@ function showLearn() {
   (knob ? knobEls : padEls)[learn.idx].classList.add('learnTarget');
   bar.hidden = false;
   bar.innerHTML = `<span>${knob ? '🎛️ Mueve la rosca' : '🟦 Toca el pad'} ${learn.idx + 1} de 8</span><button>Cancelar</button>`;
-  $('button', bar).onclick = () => { learn = null; saveM(); showLearn(); };
+  $('button', bar).onclick = () => { learn = null; showLearn(); };
 }
 
 function openSettings() {
@@ -595,6 +604,9 @@ function openSettings() {
     ${inputs.length ? inputs.map((inp, i) => `<div class="row"><span class="pill">${inp.name}</span>
       <select data-i="${i}"><option value="auto">Automático</option><option value="keys">Teclas</option><option value="pads">Pads</option></select></div>`).join('')
       : '<p class="hint">No veo ningún aparato. Enchúfalo por USB y cierra otros programas de música que lo estén usando.</p>'}
+    <h3>Lo último que ha llegado</h3>
+    <div class="row"><span class="pill" id="midiMon"></span></div>
+    <p class="hint">Toca un pad o gira una rosca: aquí debe cambiar. Si no cambia, el aparato no está mandando nada al navegador (otro programa u otra pestaña lo tiene cogido, o hay que desenchufar y enchufar).</p>
     <h3>Enseñar los controles</h3>
     <div class="row"><button class="pill" id="lKnob">🎛️ Enseñar roscas</button><button class="pill" id="lPad">🟦 Enseñar pads</button><button class="pill" id="lReset">♻️ Olvidar</button></div>
     <p class="hint">Si las roscas o los pads no hacen lo que deben, pulsa «Enseñar» y mueve cada uno en orden (1 a 8). Los pads deben estar en modo PAD (notas).</p>
@@ -606,6 +618,7 @@ function openSettings() {
     s.value = M.roles[name] || 'auto';
     s.onchange = () => { M.roles[name] = s.value; saveM(); };
   }
+  $('#midiMon').textContent = lastMidi;
   $('#lKnob').onclick = () => startLearn('knob');
   $('#lPad').onclick = () => startLearn('pad');
   $('#lReset').onclick = () => { M.ccMap = {}; M.padMap = {}; saveM(); toast('♻️ Olvidado'); };
