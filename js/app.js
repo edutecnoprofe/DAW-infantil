@@ -143,21 +143,83 @@ function songFromText(text) {
   }
   return f.song;
 }
-async function saveFile() {
-  const d = new Date(), z = n => String(n).padStart(2, '0');
-  const name = `cancion-${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}.json`;
-  const text = songToText();
-  if (window.showSaveFilePicker) {
-    try {
-      const h = await showSaveFilePicker({ suggestedName: name, types: [{ description: 'Canción', accept: { 'application/json': ['.json'] } }] });
-      const w = await h.createWritable(); await w.write(text); await w.close();
-      toast('💾 ¡Guardada!'); return;
-    } catch (e) { if (e.name === 'AbortError') return; }
-  }
+// Elige dónde guardar (hay que llamarlo justo tras el clic). Devuelve manejador, o null si toca descarga normal.
+async function pickTarget(name, description, mime, ext) {
+  if (!window.showSaveFilePicker) return null;
+  try { return await showSaveFilePicker({ suggestedName: name, types: [{ description, accept: { [mime]: [ext] } }] }); }
+  catch (e) { if (e.name === 'AbortError') throw e; return null; }
+}
+async function writeTarget(handle, blob, name) {
+  if (handle) { const w = await handle.createWritable(); await w.write(blob); await w.close(); return '💾 ¡Guardada!'; }
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = name;
+  a.href = URL.createObjectURL(blob); a.download = name;
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  toast('💾 Guardada en Descargas');
+  return '💾 Guardada en Descargas';
+}
+function fileStamp() {
+  const d = new Date(), z = n => String(n).padStart(2, '0');
+  return `cancion-${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`;
+}
+async function saveFile() {
+  const name = fileStamp() + '.json';
+  let h;
+  try { h = await pickTarget(name, 'Canción', 'application/json', '.json'); } catch (e) { return; }
+  try { toast(await writeTarget(h, new Blob([songToText()], { type: 'application/json' }), name)); }
+  catch (e) { toast('😢 No he podido guardar'); }
+}
+
+/* ---------- Exportar a audio (WAV) ---------- */
+function wavBlob(buf) {
+  const ch = Math.min(2, buf.numberOfChannels), n = buf.length, rate = buf.sampleRate;
+  const dv = new DataView(new ArrayBuffer(44 + n * ch * 2));
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); dv.setUint32(4, 36 + n * ch * 2, true); str(8, 'WAVEfmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true);
+  dv.setUint32(24, rate, true); dv.setUint32(28, rate * ch * 2, true); dv.setUint16(32, ch * 2, true); dv.setUint16(34, 16, true);
+  str(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+  const data = []; for (let c = 0; c < ch; c++) data.push(buf.getChannelData(c));
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++) { dv.setInt16(o, Math.round(clamp(data[c][i], -1, 1) * 32767), true); o += 2; }
+  return new Blob([dv.buffer], { type: 'audio/wav' });
+}
+// Dibuja el bucle repetido `passes` veces, con los efectos de cada pista, sin metrónomo
+function renderSong(passes) {
+  const L = loopBeats(), spb = 60 / state.bpm, t0 = 0.15;
+  return Engine.renderOffline(t0 + passes * L * spb + 3, () => {
+    Engine.setTempo(state.bpm);
+    for (const tr of state.tracks) {
+      if (tr.muted) continue;
+      const ch = Engine.createChain();
+      tr.knobs.forEach((v, i) => Engine.setKnob(ch, i, v));
+      for (let k = 0; k < passes; k++) {
+        for (const ev of tr.events) {
+          if (ev.p >= L) continue;
+          const t = t0 + (k * L + ev.p) * spb;
+          if (ev.k === 'p') Engine.drum(ch, ev.i, t, ev.v); else Engine.note(ch, tr.rt, ev.n, ev.v, t, ev.d * spb);
+        }
+      }
+    }
+  });
+}
+async function exportWav(passes) {
+  const name = fileStamp() + '.wav';
+  let h;
+  try { h = await pickTarget(name, 'Audio', 'audio/wav', '.wav'); } catch (e) { return; }
+  toast('🎧 Preparando el audio…');
+  try { toast(await writeTarget(h, wavBlob(await renderSong(passes)), name)); }
+  catch (e) { toast('😢 No he podido hacer el audio'); }
+}
+function openSave() {
+  const L = loopBeats(), empty = !state.tracks.some(tr => tr.events.some(e => e.p < L));
+  const secs = n => Math.round(n * L * 60 / state.bpm);
+  openModal(`<div class="center"><h2>💾 Guardar</h2>
+    <button class="pill go" id="svSong">💾 Guardar la canción<br><small>para seguir otro día</small></button>
+    <h3>🎧 Hacer audio para escuchar</h3>
+    ${empty ? '<p class="hint">Todavía no hay nada grabado.</p>' : `<p class="hint">¿Cuántas vueltas del bucle?</p>
+    <div class="row">${[1, 2, 4, 8].map(n => `<button class="pill" data-n="${n}">×${n}<br><small>${secs(n)} seg</small></button>`).join('')}</div>`}
+  </div>`);
+  $('#svSong').onclick = () => { closeModal(); saveFile(); };
+  for (const b of $('#modalBox').querySelectorAll('[data-n]')) b.onclick = () => { closeModal(); exportWav(+b.dataset.n); };
 }
 function openSong(song) {
   if (T.playing) stop();
@@ -521,7 +583,7 @@ function buildStatic() {
   $('#bMetro').onclick = () => { state.metro = !state.metro; renderTop(); saveSoon(); };
   $('#bQuant').onclick = () => { state.quant = state.quant === 0.5 ? 0.25 : state.quant === 0.25 ? 0 : 0.5; renderTop(); saveSoon(); };
   $('#bNew').onclick = openNew;
-  $('#bSave').onclick = saveFile;
+  $('#bSave').onclick = openSave;
   $('#bOpen').onclick = openFile;
   $('#bSet').onclick = openSettings;
   $('#instCard').onclick = openPicker;

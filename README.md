@@ -10,7 +10,7 @@ Estudio de música para niños que funciona en el navegador. Sin instalar nada: 
 - **Mi voz 🎤**: graba un sonido con el micrófono y tócalo en el teclado; cada tecla lo sube o baja de tono.
 - **8 roscas** que cambian el sonido de la pista elegida: Volumen, Filtro, Eco, Cueva (reverb), Monstruo (distorsión), Tono, Temblor (vibrato) y Cola (cuánto dura la nota).
 - **Imán 🧲**: coloca las notas a tiempo aunque se toquen un poco tarde. **Deshacer ↩️** borra lo último grabado.
-- La canción se guarda sola en el navegador. **💾 Guardar** la baja a un archivo (incluye lo grabado con el micro) y **📂 Abrir** la recupera, también en otro ordenador.
+- La canción se guarda sola en el navegador. **💾 Guardar** la baja a un archivo (incluye lo grabado con el micro) y **📂 Abrir** la recupera, también en otro ordenador. Desde el mismo botón se hace un **audio WAV** del bucle repetido 1, 2, 4 u 8 veces, para escucharlo fuera de la app.
 - Al alargar el bucle (de 2 a 4 u 8 compases) pregunta si repetir lo que ya hay en los compases nuevos.
 
 ## Requisitos

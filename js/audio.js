@@ -5,10 +5,26 @@ const Engine = (() => {
   const NOVOICE = { stop() {} };
   const mod = (a, n) => ((a % n) + n) % n;
 
+  let offline = false;
+
   function init() {
     if (ctx) return;
     const AC = window.AudioContext || window.webkitAudioContext;
-    ctx = new AC({ latencyHint: 'interactive' });
+    build(new AC({ latencyHint: 'interactive' }));
+  }
+
+  // Dibuja la canción entera en un contexto sin altavoces (para exportar a WAV).
+  // fill() programa las notas con las mismas funciones del motor.
+  function renderOffline(seconds, fill) {
+    const live = { ctx, master, delay, delayIn, reverbIn, noiseBuf };
+    const off = new OfflineAudioContext(2, Math.ceil(seconds * ctx.sampleRate), ctx.sampleRate);
+    try { build(off); offline = true; fill(); }
+    finally { ({ ctx, master, delay, delayIn, reverbIn, noiseBuf } = live); offline = false; }
+    return off.startRendering();
+  }
+
+  function build(c) {
+    ctx = c;
 
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -6; limiter.knee.value = 6; limiter.ratio.value = 8;
@@ -163,7 +179,7 @@ const Engine = (() => {
     };
     srcs[0].addEventListener('ended', () => { ch.voices.delete(voice); g.disconnect(); });
     ch.voices.add(voice);
-    if (ch.voices.size > 28) {
+    if (!offline && ch.voices.size > 28) {
       const old = ch.voices.values().next().value;
       ch.voices.delete(old); old.stop(0, true);
     }
@@ -343,6 +359,6 @@ const Engine = (() => {
 
   return {
     init, get ctx() { return ctx; }, latency, setTempo, createChain, setKnob, setMute,
-    note, drum, click, stopAll, loadSoundfont, recordMic, bufferFromData
+    note, drum, click, stopAll, loadSoundfont, recordMic, bufferFromData, renderOffline
   };
 })();
