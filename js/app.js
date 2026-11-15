@@ -74,17 +74,141 @@ const DB = {
     return new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
   }
 };
+function snapshot() {
+  return {
+    bpm: state.bpm, bars: state.bars, quant: state.quant, metro: state.metro, sel: state.sel,
+    tracks: state.tracks.map(t => ({
+      inst: t.inst, knobs: t.knobs, muted: t.muted, mic: t.mic,
+      events: t.events.map(({ k, n, i, v, p, d }) => ({ k, n, i, v, p, d }))
+    }))
+  };
+}
+// Pone una canción (guardada o de archivo) como la actual
+function applySong(saved) {
+  for (const tr of state.tracks) { Engine.stopAll(tr.chain); tr.chain.mute.disconnect(); }
+  const num = (v, def, a, b) => (Number.isFinite(+v) && v !== null ? clamp(+v, a, b) : def);
+  if (saved && Array.isArray(saved.tracks) && saved.tracks.length) {
+    state.bpm = Math.round(num(saved.bpm, 100, 50, 200));
+    state.bars = [1, 2, 4, 8].includes(saved.bars) ? saved.bars : 2;
+    state.quant = [0, 0.25, 0.5].includes(saved.quant) ? saved.quant : 0.5;
+    state.metro = saved.metro !== false;
+    state.tracks = saved.tracks.slice(0, MAX_TRACKS).map(s => Object.assign(newTrack(INST[s.inst] ? s.inst : 'sinte'), {
+      knobs: KNOBS.map((k, i) => Math.round(num((s.knobs || [])[i], k.def, 0, 127))),
+      muted: !!s.muted,
+      mic: s.mic && s.mic.data instanceof Float32Array && s.mic.data.length ? { data: s.mic.data, rate: num(s.mic.rate, 48000, 8000, 192000) } : null,
+      events: (Array.isArray(s.events) ? s.events : []).filter(e => e && Number.isFinite(e.p) && e.p >= 0 && e.p < 32)
+        .map(e => (e.k === 'p'
+          ? { k: 'p', i: Math.round(num(e.i, 0, 0, 7)), v: num(e.v, 100, 1, 127), p: e.p }
+          : { k: 'n', n: Math.round(num(e.n, 60, 0, 127)), v: num(e.v, 100, 1, 127), p: e.p, d: num(e.d, 0.25, 0.05, 32) }))
+    }));
+    state.sel = Math.round(num(saved.sel, 0, 0, state.tracks.length - 1));
+  } else {
+    state.tracks = ['drums', 'bass', 'sinte', 'piano'].map(newTrack); state.sel = 0;
+  }
+  for (const tr of state.tracks) {
+    tr.chain = Engine.createChain();
+    tr.knobs.forEach((v, i) => Engine.setKnob(tr.chain, i, v));
+    Engine.setMute(tr.chain, tr.muted);
+  }
+  Engine.setTempo(state.bpm);
+  T.takes = [];
+}
+
+/* ---------- Guardar / abrir en disco ---------- */
+function b64FromFloats(f) {
+  const i16 = new Int16Array(f.length);
+  for (let i = 0; i < f.length; i++) i16[i] = Math.round(clamp(f[i], -1, 1) * 32767);
+  const u8 = new Uint8Array(i16.buffer);
+  let bin = '';
+  for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function floatsFromB64(b64) {
+  const bin = atob(b64), u8 = new Uint8Array(bin.length - (bin.length % 2));
+  for (let i = 0; i < u8.length; i++) u8[i] = bin.charCodeAt(i);
+  const i16 = new Int16Array(u8.buffer), f = new Float32Array(i16.length);
+  for (let i = 0; i < f.length; i++) f[i] = i16[i] / 32767;
+  return f;
+}
+function songToText() {
+  const s = snapshot();
+  for (const t of s.tracks) if (t.mic) t.mic = { rate: t.mic.rate, pcm16: b64FromFloats(t.mic.data) };
+  return JSON.stringify({ app: 'daw-infantil', version: 1, song: s });
+}
+function songFromText(text) {
+  const f = JSON.parse(text);
+  if (!f || f.app !== 'daw-infantil' || !f.song || !Array.isArray(f.song.tracks)) throw new Error('formato');
+  for (const t of f.song.tracks) {
+    t.mic = t.mic && typeof t.mic.pcm16 === 'string' ? { rate: t.mic.rate, data: floatsFromB64(t.mic.pcm16) } : null;
+  }
+  return f.song;
+}
+async function saveFile() {
+  const d = new Date(), z = n => String(n).padStart(2, '0');
+  const name = `cancion-${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}.json`;
+  const text = songToText();
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await showSaveFilePicker({ suggestedName: name, types: [{ description: 'Canción', accept: { 'application/json': ['.json'] } }] });
+      const w = await h.createWritable(); await w.write(text); await w.close();
+      toast('💾 ¡Guardada!'); return;
+    } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = name;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast('💾 Guardada en Descargas');
+}
+function openSong(song) {
+  if (T.playing) stop();
+  allOff(); applySong(song); hwRelease();
+  renderTop(); renderTracks(); renderPanel();
+  for (const tr of state.tracks) setInstrument(tr, tr.inst);
+  saveSoon();
+}
+function openFile() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.json,application/json';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    try { openSong(songFromText(await f.text())); toast('📂 ¡Canción abierta!'); }
+    catch (e) { toast('🤔 Ese archivo no es una canción'); }
+  };
+  inp.click();
+}
+
+/* ---------- Largo del bucle ---------- */
+// Pistas que tienen algo en el trozo viejo y nada en el nuevo
+function tracksToFill(oldL, newL) {
+  return state.tracks.filter(tr => tr.events.some(e => e.p < oldL) && !tr.events.some(e => e.p >= oldL && e.p < newL));
+}
+function repeatInto(oldL, newL) {
+  for (const tr of tracksToFill(oldL, newL)) {
+    const base = tr.events.filter(e => e.p < oldL);
+    for (let off = oldL; off < newL; off += oldL) {
+      for (const e of base) tr.events.push(e.k === 'p' ? { k: 'p', i: e.i, v: e.v, p: e.p + off } : { k: 'n', n: e.n, v: e.v, p: e.p + off, d: e.d });
+    }
+  }
+}
+function setBars(n) {
+  const oldL = loopBeats(), newL = n * 4;
+  const apply = copy => {
+    if (copy) repeatInto(oldL, newL);
+    state.bars = n; renderTop(); state.tracks.forEach(drawLane); saveSoon();
+  };
+  if (newL <= oldL || !tracksToFill(oldL, newL).length) { apply(false); return; }
+  openModal(`<div class="center"><h2>Bucle más largo: ${n} compases</h2>
+    <p class="hint">¿Qué pongo en los compases nuevos?</p>
+    <div class="row"><button class="pill go" id="bCopy">🔁 Repetir lo que hay</button><button class="pill" id="bEmpty">⬜ Dejarlos vacíos</button></div></div>`);
+  $('#bCopy').onclick = () => { closeModal(); apply(true); };
+  $('#bEmpty').onclick = () => { closeModal(); apply(false); };
+}
+
 let saveTimer = 0;
 function saveSoon() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    DB.set('song', {
-      bpm: state.bpm, bars: state.bars, quant: state.quant, metro: state.metro, sel: state.sel,
-      tracks: state.tracks.map(t => ({
-        inst: t.inst, knobs: t.knobs, muted: t.muted, mic: t.mic,
-        events: t.events.map(({ k, n, i, v, p, d }) => ({ k, n, i, v, p, d }))
-      }))
-    }).catch(() => {});
+    DB.set('song', snapshot()).catch(() => {});
   }, 500);
 }
 
@@ -345,7 +469,7 @@ function buildStatic() {
   for (const n of [1, 2, 4, 8]) {
     const b = document.createElement('button');
     b.className = 'btn'; b.dataset.n = n; b.innerHTML = `<b>${n}</b>`;
-    b.onclick = () => { state.bars = n; renderTop(); state.tracks.forEach(drawLane); saveSoon(); };
+    b.onclick = () => setBars(n);
     $('#bars').appendChild(b);
   }
   // pads: fila de arriba 5-8, abajo 1-4 (como el LPD8)
@@ -397,6 +521,8 @@ function buildStatic() {
   $('#bMetro').onclick = () => { state.metro = !state.metro; renderTop(); saveSoon(); };
   $('#bQuant').onclick = () => { state.quant = state.quant === 0.5 ? 0.25 : state.quant === 0.25 ? 0 : 0.5; renderTop(); saveSoon(); };
   $('#bNew').onclick = openNew;
+  $('#bSave').onclick = saveFile;
+  $('#bOpen').onclick = openFile;
   $('#bSet').onclick = openSettings;
   $('#instCard').onclick = openPicker;
   $('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
@@ -643,18 +769,7 @@ async function boot() {
   Engine.init(); Engine.ctx.resume();
   let saved = null;
   try { saved = await DB.get('song'); } catch (e) {}
-  if (saved && saved.tracks && saved.tracks.length) {
-    Object.assign(state, { bpm: saved.bpm, bars: saved.bars, quant: saved.quant, metro: saved.metro, sel: clamp(saved.sel || 0, 0, saved.tracks.length - 1) });
-    state.tracks = saved.tracks.map(s => Object.assign(newTrack(s.inst), { knobs: s.knobs, muted: s.muted, events: s.events || [], mic: s.mic || null }));
-  } else {
-    state.tracks = ['drums', 'bass', 'sinte', 'piano'].map(newTrack);
-  }
-  for (const tr of state.tracks) {
-    tr.chain = Engine.createChain();
-    tr.knobs.forEach((v, i) => Engine.setKnob(tr.chain, i, v));
-    Engine.setMute(tr.chain, tr.muted);
-  }
-  Engine.setTempo(state.bpm);
+  applySong(saved);
   buildStatic(); renderTop(); renderTracks(); renderPanel();
   for (const tr of state.tracks) setInstrument(tr, tr.inst);
   initMidi();
